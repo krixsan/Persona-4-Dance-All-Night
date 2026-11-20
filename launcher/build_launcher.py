@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -97,6 +98,20 @@ def prepare_local_assets(game_dir: Path | None) -> None:
         print(f"[ICON] Built hybrid icon -> {ICON_PATH}")
 
 
+_SYSTEM_DLLS = {
+    "kernel32", "user32", "gdi32", "advapi32", "shell32", "ole32", "oleaut32", "ws2_32",
+    "msvcrt", "ntdll", "bcrypt", "bcryptprimitives", "crypt32", "secur32", "winmm",
+    "imm32", "setupapi", "version", "shlwapi", "comdlg32", "comctl32", "rpcrt4",
+    "dwmapi", "d3d11", "dxgi", "d3d9", "d3d12", "dxva2", "mf", "mfplat", "mfuuid",
+    "mfreadwrite", "uxtheme", "cfgmgr32", "hid", "opengl32", "vulkan-1", "iphlpapi",
+    "mswsock", "dnsapi", "ncrypt", "usp10", "shcore", "cabinet", "wldap32", "normaliz",
+    "avrt", "msimg32", "propsys", "windowscodecs", "mmdevapi", "powrprof", "userenv",
+    "psapi", "netapi32", "wsock32", "d3dcompiler_47", "gdiplus", "d2d1", "dwrite",
+    "dinput8", "xinput1_4", "ucrtbase", "vcruntime140", "msvcp140", "winspool",
+    "cryptbase", "sspicli", "wintrust", "rtworkq", "ksuser", "wevtapi", "ntmarta",
+}
+
+
 def _find_msys2_root() -> Path:
     env_root = os.environ.get("MSYS2_ROOT")
     for cand in ([Path(env_root)] if env_root else []) + [Path(r"F:\msys64"), Path(r"C:\msys64")]:
@@ -106,34 +121,36 @@ def _find_msys2_root() -> Path:
 
 
 def collect_msys2_dlls(exe_path: Path, target_dir: Path) -> int:
-    """Copy non-system MSYS2 CLANG64 runtime DLLs required by sacredfire/p4dan_pc.exe."""
-    msys_root = _find_msys2_root()
-    clang_bin = msys_root / "clang64" / "bin"
-    ldd_exe = msys_root / "usr" / "bin" / "ldd.exe"
+    """Copy transitive non-system MSYS2 CLANG64 DLLs required by sacredfire/p4dan_pc.exe."""
+    clang_bin = _find_msys2_root() / "clang64" / "bin"
+    objdump = clang_bin / "llvm-objdump.exe"
+    if objdump.is_file():
+        found: dict[str, Path] = {}
+        queue = [exe_path]
+        while queue:
+            cur = queue.pop()
+            out = subprocess.run([str(objdump), "-p", str(cur)], capture_output=True, text=True, errors="replace").stdout
+            for m in re.finditer(r"DLL Name:\s*(\S+)", out):
+                dll = m.group(1).lower()
+                stem = dll[:-4] if dll.endswith(".dll") else dll
+                if dll in found or stem in _SYSTEM_DLLS or dll.startswith(("api-ms-", "ext-ms-")):
+                    continue
+                dll_path = clang_bin / dll
+                if dll_path.is_file():
+                    found[dll] = dll_path
+                    queue.append(dll_path)
+        for src in found.values():
+            shutil.copy2(src, target_dir / src.name)
+        return len(found)
+
     copied = 0
-
-    if ldd_exe.is_file():
-        env = os.environ.copy()
-        env["PATH"] = f"{clang_bin};{msys_root / 'usr' / 'bin'};{env.get('PATH', '')}"
-        out = subprocess.check_output([str(ldd_exe), str(exe_path)], text=True, errors="replace", env=env)
-        for line in out.splitlines():
-            if "=>" not in line:
-                continue
-            rhs = line.split("=>", 1)[1].strip().split(" (", 1)[0].strip()
-            if rhs.startswith("/clang64/"):
-                win_dll = msys_root / rhs.lstrip("/").replace("/", os.sep)
-                if win_dll.is_file():
-                    shutil.copy2(win_dll, target_dir / win_dll.name)
-                    copied += 1
-        return copied
-
     for dll in clang_bin.glob("*.dll"):
         shutil.copy2(dll, target_dir / dll.name)
         copied += 1
     return copied
 
 
-def build_exe(output_dir: Path | None = None) -> Path:
+def build_exe(output_dir: Path | None = None, include_assets: bool = True) -> Path:
     """Compile P4DAN_Launcher.pyw via PyInstaller into Persona 4 Dancing All Night.exe."""
     dist_dir = output_dir or (ROOT / "dist")
     build_tmp = ROOT / "build" / "launcher_pyi"
@@ -174,9 +191,9 @@ def build_exe(output_dir: Path | None = None) -> Path:
         "--hidden-import",
         "PIL.ImageChops",
     ]
-    if ASSETS_DIR.is_dir() and any(ASSETS_DIR.iterdir()):
+    if include_assets and ASSETS_DIR.is_dir() and any(ASSETS_DIR.iterdir()):
         cmd.extend(["--add-data", f"{ASSETS_DIR};assets"])
-    if ICON_PATH.is_file():
+    if include_assets and ICON_PATH.is_file():
         cmd.extend(["--icon", str(ICON_PATH)])
     cmd.append(str(LAUNCHER_SCRIPT))
 
@@ -190,7 +207,7 @@ def build_exe(output_dir: Path | None = None) -> Path:
     return built_exe
 
 
-def package_portable(package_dir: Path, built_launcher: Path) -> None:
+def package_portable(package_dir: Path, built_launcher: Path, include_assets: bool = True) -> None:
     """Assemble a clean portable PC release folder (without game dump binaries)."""
     package_dir.mkdir(parents=True, exist_ok=True)
     if built_launcher.parent.resolve() != package_dir.resolve():
@@ -209,14 +226,14 @@ def package_portable(package_dir: Path, built_launcher: Path) -> None:
         if src.is_file():
             shutil.copy2(src, pkg_scripts / src.name)
 
-    if ASSETS_DIR.is_dir() and any(ASSETS_DIR.iterdir()):
-        pkg_assets = package_dir / "assets"
-        pkg_assets.mkdir(parents=True, exist_ok=True)
+    pkg_assets = package_dir / "assets"
+    pkg_assets.mkdir(parents=True, exist_ok=True)
+    if include_assets and ASSETS_DIR.is_dir() and any(ASSETS_DIR.iterdir()):
         for item in ASSETS_DIR.iterdir():
             if item.is_file():
                 shutil.copy2(item, pkg_assets / item.name)
 
-    for extra in ("launch_game.bat", "INSTALL.md"):
+    for extra in ("launch_game.bat", "INSTALL.md", "LICENSE"):
         src = ROOT / extra
         if src.is_file():
             shutil.copy2(src, package_dir / extra)
@@ -232,24 +249,29 @@ def main() -> None:
     parser.add_argument("--dist-dir", default=None, help="Output directory for launcher exe (default: dist/)")
     parser.add_argument("--package", default=None, help="Also assemble full portable release folder at path")
     parser.add_argument("--icon-only", action="store_true", help="Only extract icon/assets for CMake build")
+    parser.add_argument("--no-game-assets", action="store_true", help="Exclude PS4 dump icon/artwork (clean public release)")
     args = parser.parse_args()
 
-    game_dir = find_game_dir(args.game_dir)
-    if game_dir:
-        print(f"[ASSETS] Using local dump at {game_dir}")
-        prepare_local_assets(game_dir)
-    elif ICON_PATH.is_file():
-        print(f"[ICON] Using existing {ICON_PATH}")
+    include_assets = not args.no_game_assets
+    if include_assets:
+        game_dir = find_game_dir(args.game_dir)
+        if game_dir:
+            print(f"[ASSETS] Using local dump at {game_dir}")
+            prepare_local_assets(game_dir)
+        elif ICON_PATH.is_file():
+            print(f"[ICON] Using existing {ICON_PATH}")
+        else:
+            print("[ASSETS] No local PS4 dump found; building launcher without bundled game art/icon.")
     else:
-        print("[ASSETS] No local PS4 dump found; building launcher without bundled game art/icon.")
+        print("[ASSETS] --no-game-assets set; building clean release without PS4 artwork/icon.")
 
     if args.icon_only:
         return
 
     out_dir = Path(args.package) if args.package else (Path(args.dist_dir) if args.dist_dir else None)
-    built = build_exe(out_dir)
+    built = build_exe(out_dir, include_assets=include_assets)
     if args.package:
-        package_portable(Path(args.package), built)
+        package_portable(Path(args.package), built, include_assets=include_assets)
 
 
 if __name__ == "__main__":
