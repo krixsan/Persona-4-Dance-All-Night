@@ -95,6 +95,7 @@ BB_GAME_DIR="/path/to/CUSA12112/app0/uroot" python run.py
 - **Gamepad:** XInput / DualShock controllers detected automatically via SDL3.
 - **Keyboard:** `WASD` (Left Stick), Arrow keys (Right Stick), `I J K L` (D-Pad), `Space` (Cross), `LShift` (Circle), `E` (Square), `Q` (Triangle), `Enter` (Options).
 - **In-Game Overlay Menu:** Press `Insert` or `L3 + R3` anytime to adjust resolution, FPS cap, and upscaling live.
+- **Screenshot:** Press `F12` in-game (or click **`Screenshot`** in the launcher / in-game menu) to capture a PNG directly from Vulkan into `user/screenshots/`.
 
 ---
 

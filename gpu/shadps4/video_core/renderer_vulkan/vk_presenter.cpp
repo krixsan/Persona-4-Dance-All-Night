@@ -128,6 +128,61 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
                          dst_rect.offset.x, dst_rect.offset.y);
 }
 
+namespace {
+
+void CaptureScreenshotIfDue(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer cmdbuf,
+                            vk::Image image, u32 width, u32 height, vk::Format format) {
+    if (width == 0 || height == 0 || !BbOverlay::TakeScreenshotRequest()) {
+        return;
+    }
+    const VkDeviceSize size = VkDeviceSize(width) * height * 4;
+    const VkBufferCreateInfo buffer_ci{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    };
+    const VmaAllocationCreateInfo alloc_ci{
+        .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+    };
+    VkBuffer buffer{};
+    VmaAllocation allocation{};
+    VmaAllocationInfo info{};
+    if (vmaCreateBuffer(instance.GetAllocator(), &buffer_ci, &alloc_ci, &buffer, &allocation, &info) !=
+        VK_SUCCESS) {
+        return;
+    }
+    const vk::MemoryBarrier2 before{
+        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+    };
+    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &before});
+    const vk::BufferImageCopy region{
+        .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        .imageExtent = {width, height, 1},
+    };
+    cmdbuf.copyImageToBuffer(image, vk::ImageLayout::eGeneral, buffer, region);
+    const vk::MemoryBarrier2 after{
+        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .srcAccessMask = vk::AccessFlagBits2::eNone,
+        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .dstAccessMask = vk::AccessFlagBits2::eNone,
+    };
+    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &after});
+
+    const bool bgra = format == vk::Format::eB8G8R8A8Unorm || format == vk::Format::eB8G8R8A8Srgb;
+    scheduler.DeferPriorityOperation([allocator = instance.GetAllocator(), buffer, allocation, info,
+                                      width, height, bgra] {
+        vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+        BbOverlay::SaveScreenshotRGBA(static_cast<const u8*>(info.pMappedData), width, height, bgra);
+        vmaDestroyBuffer(allocator, buffer, allocation);
+    });
+}
+
+} // namespace
+
 // bbport: screenshot capture and ImGui overlays removed; the port presents directly.
 
 Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_)
@@ -669,6 +724,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     const auto cmdbuf = scheduler.CommandBuffer();
     DumpFinalFrameIfDue(instance, scheduler, cmdbuf, frame->image, frame->width, frame->height,
                         swapchain.GetSurfaceFormat().format);
+    CaptureScreenshotIfDue(instance, scheduler, cmdbuf, frame->image, frame->width, frame->height,
+                           swapchain.GetSurfaceFormat().format);
 
     if (EmulatorSettings.IsVkHostMarkersEnabled()) {
         cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
@@ -1015,6 +1072,8 @@ bool Presenter::PresentGenerated(Frame* frame) {
     DumpFrameGenIfDue(instance, scheduler, cmdbuf, image, frame->image,
                       frame->fg_hudless ? vk::Image(fg_hudless_image) : vk::Image{},
                       frame->width, frame->height, swapchain.GetSurfaceFormat().format);
+    CaptureScreenshotIfDue(instance, scheduler, cmdbuf, image, frame->width, frame->height,
+                           swapchain.GetSurfaceFormat().format);
     const vk::ImageSubresourceRange color_range{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
     const std::array pre_barriers{
         vk::ImageMemoryBarrier{

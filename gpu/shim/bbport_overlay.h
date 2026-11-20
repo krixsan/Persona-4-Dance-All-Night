@@ -48,4 +48,11 @@ void Notify(const std::string& title, const std::string& name, const std::string
 /// Window thread: the game's text dialog (ImeDialog) state, drawn as a box over the frame.
 void SetTextPrompt(bool active, const std::string& prompt, const std::string& text);
 
+/// Any thread: requests saving the next presented frame as PNG to screenshots/.
+void RequestScreenshot();
+/// Present thread: consumes an F12 / menu / launcher screenshot trigger.
+bool TakeScreenshotRequest();
+/// Encodes packed 8-bit RGBA/BGRA pixels to PNG inside <BB_GPU_USER_DIR>/screenshots/.
+void SaveScreenshotRGBA(const u8* pixels, u32 width, u32 height, bool bgra);
+
 } // namespace BbOverlay

@@ -102,6 +102,9 @@ TEXTS = {
         "btn_save": "💾 Save Data",
         "btn_log": "📁 Log",
         "btn_dir": "📂 Folder Game",
+        "btn_shot": "📸 Screenshot",
+        "shot_saved": "Screenshot tersimpan: {name}",
+        "shot_folder": "Folder Screenshot dibuka (di game: tekan F12 atau klik Screenshot)",
         "play": "MAINKAN GAME",
         "preparing": "MENYIAPKAN...",
         "running": "SEDANG BERJALAN...",
@@ -139,6 +142,9 @@ TEXTS = {
         "btn_save": "💾 Save Data",
         "btn_log": "📁 Logs",
         "btn_dir": "📂 Game Folder",
+        "btn_shot": "📸 Screenshot",
+        "shot_saved": "Screenshot saved: {name}",
+        "shot_folder": "Screenshots folder opened (in-game: press F12 or click Screenshot)",
         "play": "PLAY GAME",
         "preparing": "PREPARING...",
         "running": "RUNNING...",
@@ -738,6 +744,10 @@ class P4BasaraStyleLauncher(tk.Tk):
         self.save_img, self.save_txt = self._make_action_pill(148, 534, self.btn_tool_norm, self.btn_tool_hov, self.tr("btn_save"), COLOR_GOLD, self._open_saves)
         self.log_img, self.log_txt = self._make_action_pill(260, 534, self.btn_tool_norm, self.btn_tool_hov, self.tr("btn_log"), COLOR_GOLD, self._open_log_window)
         self.dir_img, self.dir_txt = self._make_action_pill(372, 534, self.btn_auto_norm, self.btn_auto_hov, self.tr("btn_dir"), COLOR_GOLD_BRIGHT, self._browse_app0)
+        self.shot_img, self.shot_txt = self._make_action_pill(WIDTH - 36 - 128, 534, self.btn_auto_norm, self.btn_auto_hov, self.tr("btn_shot"), COLOR_GOLD_BRIGHT, self._on_screenshot)
+        shot_tags = self.canvas.gettags(self.shot_img)
+        if shot_tags:
+            self.canvas.tag_bind(shot_tags[0], "<Button-3>", lambda e: self._open_screenshots_folder())
 
         # 8. Footer Status & Giant PLAY Button
         self.canvas.create_line(36, 576, WIDTH - 36, 576, fill="#2A2442", width=1)
@@ -777,10 +787,11 @@ class P4BasaraStyleLauncher(tk.Tk):
         boot_s = "OK" if has_boot else "AUTO"
         save_s = "OK" if has_save else "NEW"
         vk_s = "OK" if self.vulkan_ok else "NO DLL"
+        toast = getattr(self, "_toast_msg", None)
         self.canvas.itemconfig(
             self.footer_status,
-            text=f"GPU: {self.gpu_name}  |  Dump: {dump_s}  |  Boot: {boot_s}  |  Save: {save_s}  |  Vulkan: {vk_s}",
-            fill=COLOR_CYAN if ready else "#FF4D88",
+            text=toast or f"GPU: {self.gpu_name}  |  Dump: {dump_s}  |  Boot: {boot_s}  |  Save: {save_s}  |  Vulkan: {vk_s}",
+            fill=COLOR_GOLD_BRIGHT if toast else (COLOR_CYAN if ready else "#FF4D88"),
         )
         if self.preparing:
             self.canvas.itemconfig(self.play_img, image=self.btn_play_dis)
@@ -811,6 +822,7 @@ class P4BasaraStyleLauncher(tk.Tk):
         self.canvas.itemconfig(self.save_txt, text=self.tr("btn_save"))
         self.canvas.itemconfig(self.log_txt, text=self.tr("btn_log"))
         self.canvas.itemconfig(self.dir_txt, text=self.tr("btn_dir"))
+        self.canvas.itemconfig(self.shot_txt, text=self.tr("btn_shot"))
         for _, t_id, s_id, tk_key, sk_key in self.switches:
             self.canvas.itemconfig(t_id, text=self.tr(tk_key))
             self.canvas.itemconfig(s_id, text=self.tr(sk_key))
@@ -896,7 +908,8 @@ class P4BasaraStyleLauncher(tk.Tk):
             "  • Face (Notes Right): Q (Triangle)  LShift (Circle)  Space (Cross)  E (Square)\n"
             "  • Fever / Scratch: WASD (L-Stick)  &  Arrow Keys (R-Stick)\n"
             "  • Options / Pause: Enter\n"
-            "  • Touchpad: Tab (Left)  /  Backspace (Right)\n\n"
+            "  • Touchpad: Tab (Left)  /  Backspace (Right)\n"
+            "  • Screenshot: F12 (In-Game) or Launcher Screenshot button\n\n"
             "In-Game Graphics & Pad Menu: Press Insert or L3 + R3",
         )
 
@@ -904,6 +917,47 @@ class P4BasaraStyleLauncher(tk.Tk):
         save_dir = USER_DIR / "savedata" / "1" / "CUSA12112"
         save_dir.mkdir(parents=True, exist_ok=True)
         os.startfile(str(save_dir))
+
+    def _show_toast(self, msg: str, duration_ms: int = 3500):
+        self._toast_msg = msg
+        self._toast_token = getattr(self, "_toast_token", 0) + 1
+        tok = self._toast_token
+        self.refresh_controls()
+
+        def clear():
+            if getattr(self, "_toast_token", 0) == tok:
+                self._toast_msg = None
+                self.refresh_controls()
+
+        self.after(duration_ms, clear)
+
+    def _open_screenshots_folder(self):
+        shots_dir = USER_DIR / "screenshots"
+        shots_dir.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(shots_dir))
+        self._show_toast(self.tr("shot_folder"))
+
+    def _on_screenshot(self):
+        shots_dir = USER_DIR / "screenshots"
+        shots_dir.mkdir(parents=True, exist_ok=True)
+        running = self.proc is not None and self.proc.poll() is None
+        if not running:
+            self._open_screenshots_folder()
+            return
+        before = {p.name for p in shots_dir.glob("*.png")}
+        USER_DIR.mkdir(parents=True, exist_ok=True)
+        (USER_DIR / "screenshot.trigger").write_text("1", encoding="utf-8")
+        self._wait_screenshot(shots_dir, before, 0)
+
+    def _wait_screenshot(self, shots_dir: Path, before: set[str], attempt: int):
+        new_files = sorted(p for p in shots_dir.glob("*.png") if p.name not in before)
+        if new_files:
+            newest = new_files[-1].name
+            self._append_log(f"[SCREENSHOT] Saved: {shots_dir / newest}\n")
+            self._show_toast(self.tr("shot_saved", name=newest))
+            return
+        if attempt < 20:
+            self.after(120, lambda: self._wait_screenshot(shots_dir, before, attempt + 1))
 
     def _browse_app0(self):
         init = str(self.app0_dir) if self.app0_dir.is_dir() else str(BASE_DIR)

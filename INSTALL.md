@@ -40,3 +40,4 @@ Folder_Dump_PS4/CUSA12112/app0/uroot/ <- Dump PS4 lengkap (boleh ditaruh di mana
 - **Gamepad:** XInput / DualShock terdeteksi otomatis.
 - **Keyboard:** `WASD` (L-Stick), `Panah` (R-Stick), `I J K L` (D-Pad), `Space` (Cross), `LShift` (Circle), `E` (Square), `Q` (Triangle), `Enter` (Options).
 - **Menu In-Game:** Tekan `Insert` atau `L3 + R3` kapan saja untuk atur grafis/FPS live.
+- **Screenshot:** Tekan `F12` saat di dalam game (atau tombol **`📸 Screenshot`** di launcher / menu in-game). Hasil tersimpan di folder `user/screenshots/`.

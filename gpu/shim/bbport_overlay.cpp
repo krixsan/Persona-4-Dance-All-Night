@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <deque>
+#include <filesystem>
 #include <mutex>
 #include <string>
 
@@ -59,6 +61,7 @@ std::mutex imgui_mutex; // the ImGui context: window thread (input) and present 
 bool initialized = false;
 std::atomic<bool> menu_open{false};
 std::atomic<bool> pad_rescan_requested{false}; // SacredFire: the menu's "Rescan controllers"
+std::atomic<bool> screenshot_requested{false};
 bool l3_down = false, r3_down = false;
 bool dirty = false; // settings changed while open: saved on close
 float base_scale = 1.0f;
@@ -1008,6 +1011,11 @@ void Menu() {
     if (ImGui::Button(BbSettings::MenuText("Close", "Закрыть"))) {
         keep_open = false;
     }
+    ImGui::SameLine();
+    if (ImGui::Button(BbSettings::MenuText("Screenshot (F12)", "Снимок (F12)"))) {
+        keep_open = false;
+        RequestScreenshot();
+    }
     // bbport 0.51 (issues 74, 116): leaving the game from the pad (this menu opens with L3+R3). A
     // second press confirms; the window thread then closes like the window's own close button.
     static bool quit_armed;
@@ -1246,6 +1254,10 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
+        if (down && !event.key.repeat && event.key.key == SDLK_F12) {
+            RequestScreenshot();
+            return true;
+        }
         if (down && !event.key.repeat &&
             (event.key.key == SDLK_INSERT || (is_open && event.key.key == SDLK_ESCAPE))) {
             SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
@@ -1357,6 +1369,75 @@ bool MenuOpen() {
 
 bool TakePadRescan() {
     return pad_rescan_requested.exchange(false, std::memory_order_relaxed);
+}
+
+void RequestScreenshot() {
+    screenshot_requested.store(true, std::memory_order_relaxed);
+}
+
+bool TakeScreenshotRequest() {
+    if (screenshot_requested.exchange(false, std::memory_order_relaxed)) {
+        return true;
+    }
+    static const std::string trigger_path = [] {
+        const char* u = std::getenv("BB_GPU_USER_DIR");
+        std::filesystem::path base{u && u[0] ? u : "user"};
+        return (base / "screenshot.trigger").string();
+    }();
+    return std::remove(trigger_path.c_str()) == 0;
+}
+
+void SaveScreenshotRGBA(const u8* pixels, u32 width, u32 height, bool bgra) {
+    if (!pixels || width == 0 || height == 0) {
+        return;
+    }
+    const size_t pixel_count = size_t(width) * size_t(height);
+    std::vector<u8> rgba(pixel_count * 4);
+    for (size_t i = 0; i < pixel_count; ++i) {
+        const u8* src = pixels + i * 4;
+        u8* dst = rgba.data() + i * 4;
+        dst[0] = bgra ? src[2] : src[0];
+        dst[1] = src[1];
+        dst[2] = bgra ? src[0] : src[2];
+        dst[3] = 255;
+    }
+
+    size_t png_len = 0;
+    void* png_data = tdefl_write_image_to_png_file_in_memory(rgba.data(), int(width), int(height), 4, &png_len);
+    if (!png_data || png_len == 0) {
+        if (png_data) mz_free(png_data);
+        std::printf("[SCREENSHOT] PNG encoding failed (%ux%u)\n", width, height);
+        return;
+    }
+
+    const char* u = std::getenv("BB_GPU_USER_DIR");
+    std::filesystem::path shots_dir = std::filesystem::path{u && u[0] ? u : "user"} / "screenshots";
+    std::error_code ec;
+    std::filesystem::create_directories(shots_dir, ec);
+
+    std::time_t now = std::time(nullptr);
+    std::tm tm_now{};
+#ifdef _WIN32
+    localtime_s(&tm_now, &now);
+#else
+    localtime_r(&now, &tm_now);
+#endif
+    static std::atomic<u32> seq{0};
+    char fname[64];
+    std::snprintf(fname, sizeof(fname), "p4dan_%04d%02d%02d_%02d%02d%02d_%02u.png",
+                  tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday,
+                  tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec, seq.fetch_add(1) % 100);
+    const std::filesystem::path out_path = shots_dir / fname;
+    if (FILE* f = std::fopen(out_path.string().c_str(), "wb")) {
+        std::fwrite(png_data, 1, png_len, f);
+        std::fclose(f);
+        std::printf("[SCREENSHOT] Saved: %s\n", out_path.string().c_str());
+        std::fflush(stdout);
+        Notify("Screenshot Saved", fname, "Saved to user/screenshots/", 0);
+    } else {
+        std::printf("[SCREENSHOT] Cannot write: %s\n", out_path.string().c_str());
+    }
+    mz_free(png_data);
 }
 
 bool CapturesInput() {
