@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Saved FSR 4 choices must be safe before the first rendered frame on older GPUs.
+// FSR 4 must fall back safely before the first rendered frame on older GPUs.
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
-#include <unistd.h>
+#include <string>
+#include "test_platform.h"
 #include "bbport_settings.h"
 
 int main() {
     using namespace BbSettings;
-    char path[] = "/tmp/bbport-upscaler-test-XXXXXX";
-    const int fd = mkstemp(path);
-    assert(fd >= 0);
-    close(fd);
-    setenv("BB_CONFIG", path, 1);
-    unsetenv("BB_UPSCALER");
-    unsetenv("BB_UPSCALE_PRESET");
-    unsetenv("BB_RENDER_RES");
+    const std::string path = TestPlatform::TempFile("bpu");
+    TestPlatform::SetEnv("BB_CONFIG", path.c_str());
+    TestPlatform::SetEnv("BB_UPSCALER", UpscalerName(UpscalerTaa));
+    TestPlatform::UnsetEnv("BB_UPSCALE_PRESET");
+    TestPlatform::UnsetEnv("BB_RENDER_RES");
     auto& s = Get();
     s.upscaler = UpscalerTaa;
     s.preset = Performance;
@@ -31,11 +29,12 @@ int main() {
     for (bool fsr4 : {false, true}) {
         for (bool fsr411 : {false, true}) {
             for (int requested = 0; requested < UpscalerCount; ++requested) {
-                FILE* config = std::fopen(path, "w");
+                FILE* config = std::fopen(path.c_str(), "w");
                 assert(config);
                 std::fprintf(config, "upscaler=%s\npreset=3\noutput_res=2560x1440\n",
                              UpscalerName(requested));
                 std::fclose(config);
+                TestPlatform::SetEnv("BB_UPSCALER", UpscalerName(requested));
                 s.fsr4_problem = nullptr;
                 Load();
                 assert(s.upscaler == requested);
@@ -59,7 +58,7 @@ int main() {
     s.upscaler = UpscalerFsr3;
     s.preset = Performance;
     assert(RenderPreset() == Performance && !ResolutionNeedsRestart());
-    setenv("BB_RENDER_RES", "1706x960", 1);
+    TestPlatform::SetEnv("BB_RENDER_RES", "1706x960");
     assert(RenderPreset() == Quality && ResolutionNeedsRestart());
     s.preset = Quality;
     assert(!ResolutionNeedsRestart());
@@ -74,9 +73,9 @@ int main() {
     s.output_res = (output + 1) % OutputCount;
     assert(ResolutionNeedsRestart());
     s.output_res = output;
-    setenv("BB_RENDER_RES", "", 1);
+    TestPlatform::SetEnv("BB_RENDER_RES", "");
     assert(!FixedRenderSession() && !ResolutionNeedsRestart());
-    unsetenv("BB_RENDER_RES");
-    std::remove(path);
-    std::puts("Upscaler support: saved choices and FSR 3.1 fallback PASS");
+    TestPlatform::UnsetEnv("BB_RENDER_RES");
+    std::remove(path.c_str());
+    std::puts("Upscaler support: FSR 3.1 fallback PASS");
 }

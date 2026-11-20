@@ -2,6 +2,10 @@
 # drivers, adapted to the native_probe runtime through shims in shim/.
 cmake_minimum_required(VERSION 3.24)
 project(bbgpu LANGUAGES C CXX)
+option(LEGACY_GAME_HOOKS "Build legacy CTR-specific components" OFF)
+if (LEGACY_GAME_HOOKS)
+    add_compile_definitions(LEGACY_GAME_HOOKS)
+endif()
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -179,7 +183,9 @@ add_library(bbgpu ${BBGPU_KIND} ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOU
     shadps4/core/libraries/gnmdriver/gnmdriver.cpp
     shadps4/core/libraries/videoout/driver.cpp shadps4/core/libraries/videoout/video_out.cpp
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
-    shadps4/core/libraries/videodec/video_utils.cpp)
+    shadps4/core/libraries/videodec/video_utils.cpp
+    shadps4/core/libraries/videodec/videodec.cpp
+    shadps4/core/libraries/videodec/videodec_impl.cpp)
 add_dependencies(bbgpu host_shaders)
 # In-game settings menu: Dear ImGui (third_party/imgui, MIT) with its Vulkan backend, and an
 # embedded Cyrillic font (third_party/fonts).
@@ -237,7 +243,10 @@ if (WIN32)
     add_executable(sacredfire ../src/probe.c ${BB_RUNTIME} ../src/compat_win.c ../src/cpu_check.c ../src/vulkan_smoke.c
         ../src/isa_rewrite.c ../src/isa_emulate.c
         ../packaging/windows/sacredfire.rc)
-    set_target_properties(sacredfire PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF)
+    if (EXISTS "${CMAKE_SOURCE_DIR}/../packaging/windows/icons/p4dan.ico")
+        set_source_files_properties(../packaging/windows/sacredfire.rc PROPERTIES COMPILE_DEFINITIONS "HAVE_P4DAN_ICON")
+    endif()
+    set_target_properties(sacredfire PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF WIN32_EXECUTABLE FALSE)
     # isa_emulate runs inside guest code: no XMM/YMM.
     set_source_files_properties(../src/isa_emulate.c PROPERTIES COMPILE_OPTIONS "-mgeneral-regs-only")
     # Newer clang (MSYS2) warns about write-only counters kept for diagnostics.
@@ -247,21 +256,20 @@ if (WIN32)
     target_link_libraries(sacredfire PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     # The PS4 range (64 GiB - 1 TiB) must stay free: no high-entropy ASLR for heaps and stacks.
     # The guest main thread runs on the process stack: 16 MiB, committed (no stack probes).
-    target_link_options(sacredfire PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
+    target_link_options(sacredfire PRIVATE -Wl,--subsystem,console -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,2097152")
     add_executable(bb-gpu-capabilities ../tools/gpu_capabilities.c)
     target_link_libraries(bb-gpu-capabilities PRIVATE Vulkan::Vulkan PkgConfig::SDL3)
-    # The launcher (CTR-NitroFueled-PC.exe, launcher/windows): Dear ImGui on Win32 + Direct3D 11,
-    # linked statically, so the .exe next to run.py needs no DLL from bin\.
-    add_executable(ctr-launcher WIN32 ../launcher/windows/launcher.cpp ../launcher/windows/gamepads.cpp
-        third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp third_party/imgui/imgui_tables.cpp
-        third_party/imgui/imgui_widgets.cpp third_party/imgui/backends/imgui_impl_win32.cpp
-        third_party/imgui/backends/imgui_impl_dx11.cpp ../packaging/windows/launcher.rc)
-    # gamepads.cpp: SDL3's headers only; bin\SDL3.dll is loaded at run time.
-    target_include_directories(ctr-launcher PRIVATE third_party/imgui third_party/imgui/backends ${SDL3_INCLUDE_DIRS})
-    target_compile_definitions(ctr-launcher PRIVATE UNICODE _UNICODE)
-    target_link_options(ctr-launcher PRIVATE -static -municode -s)
-    target_link_libraries(ctr-launcher PRIVATE d3d11 dxgi d3dcompiler dwmapi ole32 shell32 uuid windowscodecs bcrypt)
-    set_target_properties(ctr-launcher PROPERTIES OUTPUT_NAME CTR-NitroFueled-PC INTERPROCEDURAL_OPTIMIZATION OFF)
+    if (LEGACY_GAME_HOOKS)
+        add_executable(ctr-launcher WIN32 ../legacy/launcher/windows/launcher.cpp ../legacy/launcher/windows/gamepads.cpp
+            third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp third_party/imgui/imgui_tables.cpp
+            third_party/imgui/imgui_widgets.cpp third_party/imgui/backends/imgui_impl_win32.cpp
+            third_party/imgui/backends/imgui_impl_dx11.cpp ../legacy/packaging/windows/launcher.rc)
+        target_include_directories(ctr-launcher PRIVATE third_party/imgui third_party/imgui/backends ${SDL3_INCLUDE_DIRS})
+        target_compile_definitions(ctr-launcher PRIVATE UNICODE _UNICODE)
+        target_link_options(ctr-launcher PRIVATE -static -municode -s)
+        target_link_libraries(ctr-launcher PRIVATE d3d11 dxgi d3dcompiler dwmapi ole32 shell32 uuid windowscodecs bcrypt)
+        set_target_properties(ctr-launcher PROPERTIES OUTPUT_NAME CTR-NitroFueled-PC INTERPROCEDURAL_OPTIMIZATION OFF)
+    endif()
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
@@ -274,9 +282,22 @@ target_link_libraries(motion-shader-test PRIVATE bbgpu)
 add_executable(ui-composition-test EXCLUDE_FROM_ALL ../tests/test_ui_composition.cpp)
 target_compile_options(ui-composition-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(ui-composition-test PRIVATE ..)
-add_executable(settings-test EXCLUDE_FROM_ALL ../tests/test_settings.cpp shim/bbport_settings.cpp)
+add_executable(settings-test EXCLUDE_FROM_ALL ../tests/test_settings.cpp shim/bbport_settings.cpp
+    shim/bbport_menu_es.cpp)
 target_compile_options(settings-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(settings-test PRIVATE .. shim)
+
+add_executable(fiber-test EXCLUDE_FROM_ALL ../tests/test_fiber.c ../src/runtime_fiber.c)
+target_compile_options(fiber-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(fiber-test PRIVATE ../src)
+target_link_libraries(fiber-test PRIVATE -pthread)
+
+add_executable(runtime-test EXCLUDE_FROM_ALL ../tests/test_runtime.c ${BB_RUNTIME} ../src/compat_win.c)
+target_compile_options(runtime-test PRIVATE -UNDEBUG -Wall -Wextra -Werror
+    -Wno-unused-but-set-global)
+target_include_directories(runtime-test PRIVATE .. ../src)
+target_link_libraries(runtime-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+target_link_options(runtime-test PRIVATE -Wl,--disable-high-entropy-va -Wl,--subsystem,console)
 
 add_executable(scene-resolution-test EXCLUDE_FROM_ALL ../tests/test_scene_resolution.cpp ../tests/test_gpu_runtime_stubs.cpp)
 target_include_directories(scene-resolution-test PRIVATE shim shadps4 third_party/gcn/include)
@@ -302,7 +323,7 @@ add_dependencies(camera-motion-test host_shaders)
 
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp
-    shim/bbport_settings.cpp)
+    shim/bbport_settings.cpp shim/bbport_menu_es.cpp)
 target_include_directories(upscaler-support-test PRIVATE shim)
 target_compile_options(upscaler-support-test PRIVATE -UNDEBUG)
 

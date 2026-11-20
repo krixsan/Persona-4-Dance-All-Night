@@ -10,10 +10,9 @@ there (the 1.21 build for firmware 5.05); otherwise to the one place in the exec
 matches (the 6.72+ build, whose code sits at other addresses). No match, or more than one: the
 patch is skipped whole, with a log line.
 
-Patch files: patches/*.xml in the checkout (patches/CrashTeamRacing.xml, from
-illusionyy/PS-Game-Patch) and any folder named with --patches-dir. A patch is applied when the
-in-game menu or the launcher turned its bbport.ini key on (GAME_PATCH_KEYS), when patches.json
-lists it under "enabled", or when its file marks it isEnabled and patches.json does not disable it.
+Patch files: patches/*.xml in the checkout and any folder named with --patches-dir. Files under
+patches/legacy are deliberately excluded. External patches are enabled by patches.json or by their
+isEnabled metadata unless patches.json disables them.
 """
 import argparse
 import json
@@ -24,23 +23,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 EBOOT_BASE=0x400000
-TITLE_ID='CUSA13795'
-APP_VERSION='01.21'
-# bbport.ini keys (the in-game menu, the launcher) -> "<file>/<patch name>". The patches are
-# community work from illusionyy/PS-Game-Patch (https://github.com/illusionyy/PS-Game-Patch):
-# 60 FPS Unlock and Disable Motion Blur by illusion, the 1080p Pro resolution patch by TroyWarez.
-GAME_PATCH_KEYS={'patch_60fps':'CrashTeamRacing.xml/60 FPS Unlock',
-                 'patch_no_motion_blur':'CrashTeamRacing.xml/Disable Motion Blur',
-                 'patch_pro_1080p':'CrashTeamRacing.xml/Resolution Patch (1080p for PS4 Pro)'}
-# The bundled files of other editions (the EU one, CUSA14876): their patches are selected under
-# CrashTeamRacing.xml's keys, so the menu switches and patches.json work for both.
-BUNDLED_FILES=('CrashTeamRacingEU.xml',)
-
-
-def selection_key(key):
-    """key as the menu and patches.json name it (an edition's bundled file as CrashTeamRacing.xml)."""
-    name,sep,patch=key.partition('/')
-    return 'CrashTeamRacing.xml/'+patch if sep and name in BUNDLED_FILES else key
+TITLE_ID='CUSA12112'
+APP_VERSION='01.00'
+# No title-specific patches are enabled for this source-only profile.
+GAME_PATCH_KEYS={}
 
 
 # bbport.ini render_res: the scene size the game renders in PS4 Pro mode (run.py turns the Pro
@@ -91,6 +77,8 @@ def render_plan(settings):
 
 def render_patches(settings):
     """Built-in patch elements for the render plan (a list of (key, None, Metadata element))."""
+    if not GAME_PATCH_KEYS:
+        return []
     plan=render_plan(settings)
     if plan is None:
         return []
@@ -208,22 +196,14 @@ def external_patches(directory, app_version=APP_VERSION, title_id=TITLE_ID):
 
 
 def external_selection(found, config, ini=None):
-    """Selected patches: patches.json {"enabled": [...], "disabled": [...]} overrides each file's
-    isEnabled; bbport.ini patch_* keys (GAME_PATCH_KEYS, the in-game menu) add to it."""
+    """Selected patches: patches.json overrides each file's isEnabled metadata."""
     settings={}
     if config and Path(config).is_file():
         settings=json.loads(Path(config).read_text())
     enabled,disabled=set(settings.get('enabled',[])),set(settings.get('disabled',[]))
-    for key,patch in GAME_PATCH_KEYS.items():
-        if (ini or {}).get(key)=='1': enabled.add(patch); disabled.discard(patch)
-    # The 1080p Pro patch follows render_res (Settings > Internal resolution, the in-game menu).
-    pro_1080p=GAME_PATCH_KEYS['patch_pro_1080p']
-    # With render_res the Pro mode follows it (run.py): 1080p runs the base PS4 path, so the
-    # 1080p Pro patch is never needed (on the base path its flipped branch would take the Pro one).
-    if render_plan(ini): enabled.discard(pro_1080p); disabled.add(pro_1080p)
     return [(key,path,meta) for key,path,meta in found
-            if selection_key(key) in enabled
-            or (selection_key(key) not in disabled and meta.get('isEnabled','false').lower()=='true')]
+            if key in enabled
+            or (key not in disabled and meta.get('isEnabled','false').lower()=='true')]
 
 
 def compile_external(selected, segments, elf=None):
@@ -275,8 +255,7 @@ def main():
     segments=eboot_segments(elf)
     found=external_patches(a.patches_dir,a.app_version,a.title_id)
     settings=read_settings(a.settings)
-    writes=compile_external(external_selection(found,a.patches_config,settings)+render_patches(settings),
-                            segments,elf)
+    writes=compile_external(external_selection(found,a.patches_config,settings), segments, elf)
     write_blob(a.out,writes)
     print(f'Patches: {len(writes)} writes from {len(found)} available patches')
 

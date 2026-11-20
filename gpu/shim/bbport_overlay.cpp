@@ -383,8 +383,8 @@ void Menu() {
     bool keep_open = true;
     // SacredFire: the menu title.
     if (!ImGui::Begin(
-            BbSettings::MenuText("CTR Nitro-Fueled PC  ·  Insert / L3+R3###bbport_settings",
-                                 "CTR Nitro-Fueled PC  ·  Insert / L3+R3###bbport_settings"),
+            BbSettings::MenuText("P4 PC (experimental)  ·  Insert / L3+R3###bbport_settings",
+                                 "P4 PC (experimental)  ·  Insert / L3+R3###bbport_settings"),
             &keep_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
@@ -622,16 +622,13 @@ void Menu() {
     ImGui::EndDisabled(); // upscaler off
 
     ImGui::SeparatorText(BbSettings::MenuText("Output resolution", "Разрешение вывода"));
-    // v0.3 native ultrawide (by tcosi): one selector sets the aspect and the output
-    // together, so they can never mismatch; run.py prepares the matching assets.
     {
-        static const char* entries[] = {"16:9 — 1280 x 720", "16:9 — 1920 x 1080", "16:9 — 2560 x 1440", "16:9 — 3840 x 2160",
-                                        "21:9 UltraWide — 2560 x 1080", "21:9 UltraWide — 3440 x 1440", "32:9 Super UltraWide — 5120 x 1440"};
-        static const int aspects[] = {0, 0, 0, 0, 1, 1, 2};
+        static const char* entries[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160"};
+        static const int aspects[] = {0, 0, 0, 0};
         static_assert(sizeof(entries) / sizeof(entries[0]) == BbSettings::OutputCount, "outputs match settings");
         int current = std::clamp(s.output_res.load(), 0, BbSettings::OutputCount - 1);
-        if (ImGui::BeginCombo(BbSettings::MenuText("Aspect / output (restart required)",
-                                                   "Aspecto / salida (tras reiniciar)"),
+        if (ImGui::BeginCombo(BbSettings::MenuText("Output resolution (restart required)",
+                                                   "Resolución de salida (tras reiniciar)"),
                               entries[current])) {
             for (int i = 0; i < BbSettings::OutputCount; ++i) {
                 if (ImGui::Selectable(entries[i], i == current)) {
@@ -642,13 +639,8 @@ void Menu() {
             ImGui::EndCombo();
         }
         Hint(BbSettings::MenuText(
-            "One choice: the aspect and the output size together. 21:9 centres the HUD at "
-            "2560x1080 or 3440x1440; 32:9 at 5120x1440. Upscaling is off while ultrawide is on "
-            "and internal resolution is capped at 1440p. The first ultrawide launch prepares "
-            "about 9 GB of patched archives; original files are kept. Applies after restarting.",
-            "Una sola opción: aspecto y salida juntos. 21:9 centra el HUD a 2560x1080 o 3440x1440; "
-            "32:9 a 5120x1440. Sin escalado con ultra-panorámico; interna hasta 1440p. El primer "
-            "arranque prepara unos 9 ГБ архивов; originales intactos. Tras reiniciar."));
+            "Select the host output resolution. Changes apply after restarting.",
+            "Выберите разрешение вывода. Изменения применяются после перезапуска."));
     }
     const char* live_modes[] = {BbSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)"),
                                 BbSettings::MenuText("Off (faster)", "Выключена (быстрее)"),
@@ -674,9 +666,7 @@ void Menu() {
         "Выключена: всё рисуется в разрешении пресета, смена — через перезапуск. Авто включает "
         "её на мощных дискретных видеокартах. Применяется после перезапуска игры."));
     }
-    // Game patches (patches/CrashTeamRacing.xml): bbport's own game-effect patches went with its
-    // Bloodborne profile (removed 2026-10-09).
-    // v0.4: the menu in tabs, in the launcher's look (ApplyMenuTheme).
+    // The menu is split into runtime settings tabs.
     if (!ImGui::BeginTabBar("menu_tabs")) {
         ImGui::End();
         return;
@@ -684,8 +674,8 @@ void Menu() {
     const bool picture_tab = ImGui::BeginTabItem(BbSettings::MenuText("Picture", "Изображение"));
     if (picture_tab) {
     MenuSection(BbSettings::MenuText("Resolution and upscaling", "Разрешение и апскейл"));
-    // SacredFire: the scene resolution (render_res) replaces the 1080p Pro patch's checkbox; a
-    // DLSS quality mode sets it instead (scripts/patches.py render_plan).
+#ifdef LEGACY_GAME_HOOKS
+    // CTR render scaling depends on executable offsets retained only for legacy analysis.
     const bool dlss_sized = s.temporal == BbSettings::TemporalDlss && s.dlss_quality > 0;
     {
         static const char* labels[] = {"854 x 480", "1280 x 720", "1920 x 1080",
@@ -715,6 +705,7 @@ void Menu() {
             "Размер, в котором игра рисует 3D-сцену. Выше 1080p используется режим PS4 Pro, кадр "
             "выводится в 4K; на экране 1080p это сглаживает края. Для 4K нужна мощная видеокарта."));
     }
+#endif
     // SacredFire: one upscaler at a time (bbport.ini temporal): FSR 1 (spatial) or the temporal
     // ones, FSR 3, DLSS and FSR 4 (vk_ctr_fsr3). Live; DLSS's quality mode and output need a restart.
     {
@@ -835,6 +826,7 @@ void Menu() {
 
     ImGui::EndTabItem();
     }
+#ifdef LEGACY_GAME_HOOKS
     if (ImGui::BeginTabItem(BbSettings::MenuText("Game", "Игра"))) {
     MenuSection(BbSettings::MenuText("Game patches (restart required)", "Патчи игры (после перезапуска)"));
     for (int g = 0; g < BbSettings::GamePatchCount; ++g) {
@@ -851,6 +843,7 @@ void Menu() {
 
     ImGui::EndTabItem();
     }
+#endif
     // SacredFire: controller ports for split screen. Each port takes one connected gamepad; the
     // runtime logs the matching user in and reads that pad for it. Port 1 is the player.
     if (ImGui::BeginTabItem(BbSettings::MenuText("Controllers", "Контроллеры"))) {

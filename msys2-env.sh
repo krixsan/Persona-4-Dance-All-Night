@@ -1,7 +1,10 @@
 # Sourced by the Windows build/run scripts: puts the MSYS2 CLANG64 toolchain first on PATH.
-# MSYS2_ROOT overrides the default C:/msys64.
-msys2_root=${MSYS2_ROOT:-/c/msys64}
-if [[ -d $msys2_root/clang64/bin ]]; then
-    export PATH="$msys2_root/clang64/bin:$msys2_root/usr/bin:$PATH"
-    export MSYSTEM=CLANG64
-fi
+# MSYS2_ROOT overrides the default F:/msys64 or C:/msys64.
+for candidate in "${MSYS2_ROOT:-}" "/f/msys64" "/c/msys64"; do
+    if [[ -n "$candidate" && -d "$candidate/clang64/bin" ]]; then
+        export MSYS2_ROOT="$candidate"
+        export PATH="$candidate/clang64/bin:$candidate/usr/bin:$PATH"
+        export MSYSTEM=CLANG64
+        break
+    fi
+done

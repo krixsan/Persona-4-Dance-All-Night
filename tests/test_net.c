@@ -142,8 +142,8 @@ int main(int argc,char **argv) {
     /* HTTPS becomes plain HTTP to the private server's HTTP port, chunked replies decoded. */
     pthread_t server;
     pthread_create(&server,NULL,http_server,&http_listener);
-    const int tmpl=http_template(1,"CTR/1.0",1,0);
-    assert(!http_add_header(tmpl,"X-Title","CUSA13795",0));
+    const int tmpl=http_template(1,"Test/1.0",1,0);
+    assert(!http_add_header(tmpl,"X-Title","CUSA12112",0));
     const int conn=http_connection(tmpl,"https://lavender-ps4-auth3.prod.demonware.net:443",1);
     const int req=http_request2(conn,"POST","https://lavender-ps4-auth3.prod.demonware.net/v1/auth?x=1",4);
     int status=0;
@@ -152,8 +152,8 @@ int main(int argc,char **argv) {
     pthread_join(server,NULL);
     assert(strstr(http_seen,"POST /v1/auth?x=1 HTTP/1.1\r\n"));
     assert(strstr(http_seen,"Host: lavender-ps4-auth3.prod.demonware.net\r\n"));
-    assert(strstr(http_seen,"X-SacredFire-Scheme: https\r\n") && strstr(http_seen,"X-Title: CUSA13795\r\n"));
-    assert(strstr(http_seen,"User-Agent: CTR/1.0\r\n") && strstr(http_seen,"Content-Length: 4\r\n"));
+    assert(strstr(http_seen,"X-SacredFire-Scheme: https\r\n") && strstr(http_seen,"X-Title: CUSA12112\r\n"));
+    assert(strstr(http_seen,"User-Agent: Test/1.0\r\n") && strstr(http_seen,"Content-Length: 4\r\n"));
     assert(!http_status(req,&status) && status==200);
     int exists=-1;
     uint64_t length=0;

@@ -59,6 +59,7 @@ Frontend::WindowSDL* g_window = nullptr;
 
 namespace Libraries::GnmDriver { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::Videodec { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::VideoOut { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Kernel { void RegisterEventQueue(Core::Loader::SymbolsResolver* sym); }
 
@@ -312,6 +313,7 @@ extern "C" void bbgpu_register_kernel(void) {
     Core::Loader::SymbolsResolver resolver;
     Libraries::Kernel::RegisterEventQueue(&resolver);
     Libraries::AvPlayer::RegisterLib(&resolver);
+    Libraries::Videodec::RegisterLib(&resolver);
 }
 
 extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {

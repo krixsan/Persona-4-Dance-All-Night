@@ -42,4 +42,16 @@ gpu/shim/bbport_gnm_table.inc
 /backups/
 /launcher.ini
 /CUSA13795*/
+/CUSA12112*/
+/00_GAME_DUMP/
+/game_data/
+/assets/
+/launcher/assets/
+packaging/windows/icons/*.ico
+launcher_prefs.json
+build/
+*.spec
+*.exe
+*.dll
+*.bak_*
 *.pkg

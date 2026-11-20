@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import struct
 from prepare import parse_self, span, unpack
+from game_check import executable_path
 
 
 def encode_id(value):
@@ -50,7 +51,7 @@ def module(path):
     def identity(name):
         parts = name.split('#')
         if len(parts) != 3:
-            raise ValueError(f'unsupported symbol encoding {name!r}')
+            return None
         n, lib, mod = parts
         return (n, libraries[lib], modules[mod])
     symbols = []
@@ -72,7 +73,7 @@ def module(path):
 
 
 def link(game, out):
-    main = module(game/'eboot.bin')
+    main = module(executable_path(game))
     libc = module(game/'sce_module/libc.prx')
     raw = (out/'boot.bin').read_bytes()
     magic, size, entry, ns, nr, ni, flags = unpack('<8s6Q', raw, 0)

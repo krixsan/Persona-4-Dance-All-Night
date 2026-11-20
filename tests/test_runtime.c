@@ -4,13 +4,33 @@
 
 /* The settings menu of the GPU library restarts through probe.c, which tests do not link. */
 void runtime_restart(void) { abort(); }
+uintptr_t runtime_probe_image(uint64_t *size) { (void)size; abort(); }
+void runtime_probe_read_image(uintptr_t address, void *data, uint64_t size) {
+    (void)address; (void)data; (void)size; abort();
+}
+int runtime_probe_write_image(uintptr_t address, const void *data, uint64_t size) {
+    (void)address; (void)data; (void)size; abort();
+}
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+static LONG CALLBACK memory_fault(EXCEPTION_POINTERS *info) {
+    const EXCEPTION_RECORD *record=info->ExceptionRecord;
+    if (record->ExceptionCode==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2) {
+        if (runtime_memory_handle_fault((uintptr_t)record->ExceptionInformation[1],
+                                        (unsigned)record->ExceptionInformation[0]))
+            return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 
 typedef int (ABI *Register)(GuestCallback);
 typedef int (ABI *RegisterCxa)(void (ABI *)(void *), void *, void *);
@@ -24,6 +44,9 @@ typedef int32_t (ABI *Allocate)(int64_t, int64_t, uint64_t, uint64_t, int, int64
 typedef int32_t (ABI *Map)(void **, uint64_t, int, int, int64_t, uint64_t);
 typedef int32_t (ABI *Unmap)(void *, uint64_t);
 typedef int32_t (ABI *Release)(uint64_t, uint64_t);
+typedef int32_t (ABI *PosixSemInit)(void *, int32_t, uint32_t);
+typedef int32_t (ABI *PosixSemOperation)(void *);
+typedef int32_t (ABI *PosixSemGetValue)(void *, int32_t *);
 #define GET(type, name) ((type)runtime_resolve(name, 0))
 typedef void *(ABI *TlsAddress)(const uint64_t *);
 typedef void *(ABI *ThreadSelf)(void);
@@ -76,6 +99,20 @@ static void libc_support(void) {
     GET(SetHeap,"p5EcQeEeJAE#libkernel")(NULL);
     assert(runtime_application_heap_api()==NULL);
     runtime_set_procparam(NULL);
+
+    uint64_t posix_sem=0;
+    PosixSemInit posix_init=GET(PosixSemInit,"pDuPEf3m4fI#libScePosix");
+    PosixSemOperation posix_wait=GET(PosixSemOperation,"YCV5dGGBcCo#libScePosix");
+    PosixSemOperation posix_post=GET(PosixSemOperation,"IKP8typ0QUk#libScePosix");
+    PosixSemOperation posix_destroy=GET(PosixSemOperation,"cDW233RAwWo#libScePosix");
+    PosixSemGetValue posix_getvalue=GET(PosixSemGetValue,"Bq+LRV-N6Hk#libScePosix");
+    assert(posix_init && posix_wait && posix_post && posix_destroy && posix_getvalue);
+    int32_t value=-1;
+    assert(posix_init(&posix_sem,0,1)==0 && posix_getvalue(&posix_sem,&value)==0 && value==1);
+    assert(posix_wait(&posix_sem)==0 && posix_getvalue(&posix_sem,&value)==0 && value==0);
+    assert(posix_post(&posix_sem)==0 && posix_getvalue(&posix_sem,&value)==0 && value==1);
+    assert(posix_destroy(&posix_sem)==0 && posix_wait(&posix_sem)==-1 && *runtime_errno()==EINVAL);
+    assert(posix_init(&posix_sem,1,0)==-1 && *runtime_errno()==ENOSYS);
 }
 static int order[512], count;
 static Register register_plain;
@@ -333,12 +370,28 @@ static void rw_timeouts(void) {
     fixture_destroy(&f);
 }
 int main(int argc,char **argv) {
+    setvbuf(stdout,NULL,_IONBF,0);
+#ifdef _WIN32
+    PVOID memory_fault_handler=AddVectoredExceptionHandler(1,memory_fault);
+    assert(memory_fault_handler);
+#endif
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#libc",0)==0);
     runtime_start(1);
     assert(runtime_resolve("bzQExy189ZI#wrong#module",0)==0);
     assert(runtime_resolve("unknown",0)==0);
     assert(runtime_resolve("8zTFvBIAIN8#libc",1)==0);
     assert(runtime_resolve("f7uOxY9mM1U#libkernel",0)==0);
+    assert(runtime_resolve("qQJfO8HAiaY#libSceNpManager",0)!=0);
+    typedef int32_t (ABI *SafeArea)(void *);
+    SafeArea safe_area=GET(SafeArea,"1n37q1Bvc5Y#libSceSystemService");
+    struct { float ratio; uint8_t reserved[128]; } area;
+    memset(&area,0xff,sizeof(area));
+    assert(safe_area && safe_area(&area)==0 && area.ratio==1.0f);
+    for (size_t i=0;i<sizeof(area.reserved);++i) assert(area.reserved[i]==0);
+    assert((uint32_t)safe_area(NULL)==0x80a10003);
+    typedef int32_t (ABI *CommonDialogIsUsed)(void);
+    CommonDialogIsUsed common_dialog_is_used=GET(CommonDialogIsUsed,"BQ3tey0JmQM#libSceCommonDialog");
+    assert(common_dialog_is_used && common_dialog_is_used()==0);
     uint64_t *canary=(uint64_t *)runtime_resolve("f7uOxY9mM1U#libkernel",1);
     assert(canary && *canary && !(*canary & 255));
     if (argc>1 && !strcmp(argv[1],"--guard-recursion")) {

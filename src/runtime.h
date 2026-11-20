@@ -29,6 +29,7 @@ void runtime_mutex_report(void);
 uintptr_t runtime_memory_resolve(const char *name);
 void runtime_memory_report(void);
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
+int runtime_memory_handle_fault(uintptr_t address, unsigned access);
 /* Prepared-image accessors (probe.c): guest address == host address. */
 uintptr_t runtime_probe_image(uint64_t *size);
 void runtime_probe_read_image(uintptr_t address, void *data, uint64_t size);
@@ -58,6 +59,7 @@ void runtime_set_main_tls(const void *data, uint64_t filesz, uint64_t memsz, uin
 void runtime_thread_attach_main(void);
 int32_t *runtime_errno(void);
 uintptr_t runtime_sema_resolve(const char *name);
+uintptr_t runtime_fiber_resolve(const char *name);
 uintptr_t runtime_eventflag_resolve(const char *name);
 uintptr_t runtime_json2_resolve(const char *name);
 void runtime_eventflag_report(void);

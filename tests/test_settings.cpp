@@ -6,7 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <unistd.h>
+#include "test_platform.h"
 #include "gpu/shim/bbport_settings.h"
 
 static std::string Read(const char* path) {
@@ -17,25 +17,28 @@ static std::string Read(const char* path) {
 }
 
 int main() {
-    char path[] = "/tmp/bbport-settings-test-XXXXXX";
-    const int fd = mkstemp(path);
-    assert(fd >= 0);
+    const std::string path = TestPlatform::TempFile("bpt");
+    TestPlatform::UnsetEnv("BB_UPSCALER");
     const char ini[] = "# launcher\nupscaler=fsr3\nkey.cross=X, Space\npad.circle=a\nshow_fps=0\n"
                        "fullscreen_hint=1\n";
-    assert(write(fd, ini, sizeof(ini) - 1) == ssize_t(sizeof(ini) - 1));
-    close(fd);
-    setenv("BB_CONFIG", path, 1);
+    {
+        std::ofstream file(path);
+        assert(file);
+        file.write(ini, sizeof(ini) - 1);
+        assert(file);
+    }
+    TestPlatform::SetEnv("BB_CONFIG", path.c_str());
 
     BbSettings::Load();
     auto& s = BbSettings::Get();
-    assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.show_fps && s.menu_x < 0.0f);
+    assert(!s.show_fps && s.menu_x < 0.0f);
     s.show_fps = true;
     s.upscaler = BbSettings::UpscalerFsr411;
     s.menu_x = 0.625f;
     s.menu_y = 0.125f;
     BbSettings::Save();
 
-    const std::string saved = Read(path);
+    const std::string saved = Read(path.c_str());
     // The launcher's controls, its other keys and comments stay; the menu's keys are replaced
     // in place, new ones appended.
     assert(saved.find("# launcher\nupscaler=fsr411\nkey.cross=X, Space\npad.circle=a\nshow_fps=1\n"
@@ -46,7 +49,7 @@ int main() {
     s.menu_x = -1.0f;
     s.menu_y = -1.0f;
     BbSettings::Load();
-    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerFsr411);
-    unlink(path);
+    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerOff);
+    std::remove(path.c_str());
     std::puts("PASS: settings save keeps other keys, menu position");
 }

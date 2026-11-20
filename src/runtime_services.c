@@ -7,7 +7,6 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/bbgpu.h"
-#include "ctr_trophies.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,6 +117,13 @@ static ABI int32_t system_status(unsigned char *status) {
     memset(status,0,12); /* event_num=0, no overlay, foreground, normal CPU mode */
     return 0;
 }
+static ABI int32_t system_safe_area(void *info) {
+    if (!info) return SYSTEM_PARAMETER;
+    struct { float ratio; uint8_t reserved[128]; } *area=info;
+    memset(area,0,sizeof(*area));
+    area->ratio=1.0f;
+    return 0;
+}
 static ABI int32_t system_event(void *event) { (void)event; return SYSTEM_NO_EVENT; }
 static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
 static ABI int32_t launch_browser(void) { note("SystemService: web browser request ignored (offline)"); return 0; }
@@ -211,6 +217,7 @@ static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog
                          {"WebBrowserDialog",0,0},{"InvitationDialog",0,0}};
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
+static ABI int32_t common_is_used(void) { return 0; }
 static int32_t dialog_init(int i) {
     if (dialogs[i].initialized) return (int32_t)0x80B80004;
     dialogs[i].initialized=1; dialogs[i].status=1; return 0;
@@ -405,19 +412,6 @@ static void trophy_load(void) {
     }
     if (f) fclose(f);
     trophy_total=listed ? listed : trophy_count_from_trp();
-    /* No trophies.tsv (the launcher writes it): CTR's own list (ctr_trophies.h). */
-    if (!listed && trophy_total==CTR_TROPHY_COUNT && (!strcmp(trophy_title,"CUSA13795") || !strcmp(trophy_title,"CUSA14876"))) {
-        const char *lang=getenv("BB_LANGUAGE");
-        const int es=lang && (!strcmp(lang,"3") || !strcmp(lang,"20"));
-        for (int i=0;i<CTR_TROPHY_COUNT;++i) {
-            const CtrTrophy *t=&ctr_trophies[i];
-            trophy_grade[t->id]=t->grade;
-            if (t->grade=='P') trophy_platinum=t->id;
-            trophy_names[t->id]=strdup(t->name);
-            trophy_details[t->id]=strdup(es ? t->es : t->en);
-        }
-        listed=CTR_TROPHY_COUNT;
-    }
     if (trophy_platinum<0 && !listed && trophy_total>1) trophy_platinum=0; /* the usual id when the grades are unknown */
     int before=0;
     for (int i=0;i<TROPHY_MAX;++i) before+=trophy_unlocked_at[i]!=0;
@@ -661,6 +655,7 @@ static const RuntimeExport exports[]={
     {"sceUserServiceGetInitialUser",user_initial}, {"sceUserServiceGetLoginUserIdList",user_list},
     {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
     {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceGetStatus",system_status},
+    {"sceSystemServiceGetDisplaySafeAreaInfo",system_safe_area},
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
     {"sceNetInit",net_init}, {"sceNetTerm",net_term}, {"sceNetErrnoLoc",net_errno_loc},
@@ -694,7 +689,8 @@ static const RuntimeExport exports[]={
     {"sceHttpGetStatusCode",http_fail}, {"sceHttpGetResponseContentLength",http_fail},
     {"sceHttpReadData",http_fail},
     {"sceNpGetState",np_state}, {"sceNpGetOnlineId",np_signed_out}, {"sceNpGetNpId",np_signed_out},
-    {"sceNpRegisterStateCallback",np_register}, {"sceNpUnregisterStateCallback",ok_void},
+    {"sceNpRegisterStateCallback",np_register}, {"sceNpRegisterStateCallbackA",np_register},
+    {"sceNpUnregisterStateCallback",ok_void},
     {"sceNpRegisterGamePresenceCallback",np_register_void}, {"sceNpRegisterPlusEventCallback",np_register},
     {"sceNpUnregisterPlusEventCallback",ok_void}, {"sceNpCheckCallback",ok_void},
     {"sceNpSetNpTitleId",ok_void}, {"sceNpNotifyPlusFeature",ok_void}, {"sceNpSetContentRestriction",ok_void},
@@ -749,7 +745,7 @@ static const RuntimeExport exports[]={
     {"sceNpMatching2CreateContext",np_signed_out},
     {"sceNpSignalingInitialize",ok_void}, {"sceNpSignalingTerminate",ok_void},
     {"sceNpSignalingCreateContext",np_signed_out},
-    {"sceCommonDialogInitialize",common_init},
+    {"sceCommonDialogInitialize",common_init}, {"sceCommonDialogIsUsed",common_is_used},
     {"sceMsgDialogInitialize",msg_init}, {"sceMsgDialogOpen",msg_open},
     {"sceMsgDialogUpdateStatus",msg_status}, {"sceMsgDialogTerminate",msg_term},
     {"sceMsgDialogGetResult",msg_result},

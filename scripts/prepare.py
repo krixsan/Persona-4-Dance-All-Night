@@ -146,7 +146,7 @@ class GameCheckError(Exception):
 
 
 def prepare(game, out):
-    source = (game / 'eboot.bin').read_bytes()
+    source = game_check.executable_path(game).read_bytes()
     elf, header, ph, segments, missing = parse_self(source)
     loads = [p for p in ph if p['type'] in (1, 0x61000010)]
     def mapped(addr, size=8):
@@ -270,7 +270,9 @@ def prepare(game, out):
                   status='Prepared only; execution and Vulkan are tested separately.')
     (out / 'analysis.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f"{report['sfo'].get('TITLE')} | entry={header[4]:#x} | image={size:,} bytes")
-    if game_profile and game_profile.get('variant'):
+    if game_profile and game_profile.get('variant') == 'source-only':
+        print('Source-only executable profile; no title-specific patches are enabled')
+    elif game_profile and game_profile.get('variant'):
         sdk = next((f.split('=', 1)[1] for f in str(report['sfo'].get('PUBTOOLINFO', '')).split(',')
                     if f.startswith('sdk_ver=')), '?')
         print(f"Update build: {game_profile['version']} for firmware {game_profile['variant']} (param.sfo sdk_ver={sdk})"

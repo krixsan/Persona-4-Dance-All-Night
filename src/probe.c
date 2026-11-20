@@ -277,6 +277,9 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
         }
     }
     if (code==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2) {
+        if (runtime_memory_handle_fault((uintptr_t)record->ExceptionInformation[1],
+                                        (unsigned)record->ExceptionInformation[0]))
+            return EXCEPTION_CONTINUE_EXECUTION;
         /* GPU page tracking (write-protected guest pages) is resolved first. */
         if (gpu_enabled && bbgpu_handle_fault(info,(void *)record->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
         if (runtime_fault_recover) {

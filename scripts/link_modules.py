@@ -17,6 +17,7 @@ from pathlib import Path
 import struct
 from prepare import parse_self, span, unpack
 from link_libc import encode_id
+from game_check import executable_path
 
 DEFAULT_MODULES = ('libc.prx', 'libSceFios2.prx')
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
@@ -90,7 +91,7 @@ def patch_fs_loads(image, ph, base):
 
 
 def link(game, out, module_names=DEFAULT_MODULES):
-    main = module(game / 'eboot.bin')
+    main = module(executable_path(game))
     raw = (out / 'boot.bin').read_bytes()
     magic, size, entry, ns, nr, ni, flags = unpack('<8s6Q', raw, 0)
     if magic != b'BBPROBE2':

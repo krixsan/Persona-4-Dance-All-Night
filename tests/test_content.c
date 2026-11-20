@@ -22,8 +22,8 @@ int main(int argc,char **argv) {
     runtime_content_configure(profile);
     if (argc>1 && !strcmp(argv[1],"--addons")) {
         /* DLC from the content profile: counted without a list, written up to the capacity. */
-        runtime_content_add_addon("CTRDELUXEPACK001");
-        runtime_content_add_addon("CTRCODEKART00001");
+        runtime_content_add_addon("P4DELUXEPACK0001");
+        runtime_content_add_addon("P4SONGCODE000001");
         unsigned char none[32]={0};
         unsigned char boot[40];
         assert(load(0xb4)==0 && init(none,boot)==0);
@@ -31,10 +31,10 @@ int main(int argc,char **argv) {
         assert(list(0,NULL,0,&hits)==0 && hits==2);
         unsigned char out[24*2+8]; memset(out,0xaa,sizeof(out));
         assert(list(0,out,1,&hits)==0 && hits==1);
-        assert(!memcmp(out,"CTRDELUXEPACK001",17) && out[17]==0 && out[19]==0);
+        assert(!memcmp(out,"P4DELUXEPACK0001",16) && out[16]==0 && out[19]==0);
         uint32_t status; memcpy(&status,out+20,4); assert(status==4);
         for (unsigned i=24;i<sizeof(out);++i) assert(out[i]==0xaa);
-        assert(list(0,out,5,&hits)==0 && hits==2 && !memcmp(out+24,"CTRCODEKART00001",17));
+        assert(list(0,out,5,&hits)==0 && hits==2 && !memcmp(out+24,"P4SONGCODE000001",16));
         for (unsigned i=48;i<sizeof(out);++i) assert(out[i]==0xaa);
         puts("PASS: AppContent add-ons"); return 0;
     }

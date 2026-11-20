@@ -7,6 +7,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <errno.h>
+#include <limits.h>
 #include <time.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 typedef struct Waiter {
@@ -23,12 +24,23 @@ typedef struct Sema {
     Waiter *first;
     struct Sema *next;
 } Sema;
+typedef struct PosixSema {
+    const void *address;
+    unsigned value, waiters;
+    pthread_cond_t event;
+    struct PosixSema *next;
+} PosixSema;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static Sema *registry;
+static PosixSema *posix_registry;
 static uint32_t next_id=1;
 static size_t created, deleted, acquired, signaled, timed_out;
 static Sema *find(uint32_t id) {
     for (Sema *s=registry;s;s=s->next) if (s->id==id) return s;
+    return NULL;
+}
+static PosixSema *find_posix(const void *address) {
+    for (PosixSema *s=posix_registry;s;s=s->next) if (s->address==address) return s;
     return NULL;
 }
 static void host_check(int e) {
@@ -169,6 +181,80 @@ unsigned runtime_sema_waiters(uint32_t id) {
     pthread_mutex_unlock(&lock);
     return n;
 }
+static ABI int32_t posix_sem_init(void *address,int32_t pshared,uint32_t value) {
+    if (!address || value>INT_MAX) { *runtime_errno()=EINVAL; return -1; }
+    if (pshared) { *runtime_errno()=ENOSYS; return -1; }
+    PosixSema *s=calloc(1,sizeof(*s));
+    if (!s) { *runtime_errno()=ENOMEM; return -1; }
+    const int e=pthread_cond_init(&s->event,NULL);
+    if (e) { free(s); *runtime_errno()=e; return -1; }
+    s->address=address; s->value=value;
+    pthread_mutex_lock(&lock);
+    if (find_posix(address)) {
+        pthread_mutex_unlock(&lock);
+        pthread_cond_destroy(&s->event);
+        free(s);
+        *runtime_errno()=EBUSY;
+        return -1;
+    }
+    s->next=posix_registry; posix_registry=s;
+    pthread_mutex_unlock(&lock);
+    return 0;
+}
+static ABI int32_t posix_sem_destroy(void *address) {
+    pthread_mutex_lock(&lock);
+    PosixSema **p=&posix_registry;
+    while (*p && (*p)->address!=address) p=&(*p)->next;
+    if (!*p) { pthread_mutex_unlock(&lock); *runtime_errno()=EINVAL; return -1; }
+    PosixSema *s=*p;
+    if (s->waiters) { pthread_mutex_unlock(&lock); *runtime_errno()=EBUSY; return -1; }
+    *p=s->next;
+    pthread_mutex_unlock(&lock);
+    const int e=pthread_cond_destroy(&s->event);
+    free(s);
+    if (e) { *runtime_errno()=e; return -1; }
+    return 0;
+}
+static ABI int32_t posix_sem_wait(void *address) {
+    pthread_mutex_lock(&lock);
+    PosixSema *s=find_posix(address);
+    if (!s) { pthread_mutex_unlock(&lock); *runtime_errno()=EINVAL; return -1; }
+    ++s->waiters;
+    while (!s->value) {
+        const int e=pthread_cond_wait(&s->event,&lock);
+        if (e) {
+            --s->waiters;
+            pthread_mutex_unlock(&lock);
+            *runtime_errno()=e;
+            return -1;
+        }
+    }
+    --s->waiters;
+    --s->value;
+    pthread_mutex_unlock(&lock);
+    return 0;
+}
+static ABI int32_t posix_sem_post(void *address) {
+    pthread_mutex_lock(&lock);
+    PosixSema *s=find_posix(address);
+    if (!s) { pthread_mutex_unlock(&lock); *runtime_errno()=EINVAL; return -1; }
+    if (s->value==INT_MAX) { pthread_mutex_unlock(&lock); *runtime_errno()=EOVERFLOW; return -1; }
+    ++s->value;
+    const int e=s->waiters ? pthread_cond_signal(&s->event) : 0;
+    if (e) --s->value;
+    pthread_mutex_unlock(&lock);
+    if (e) { *runtime_errno()=e; return -1; }
+    return 0;
+}
+static ABI int32_t posix_sem_getvalue(void *address,int32_t *value) {
+    if (!value) { *runtime_errno()=EINVAL; return -1; }
+    pthread_mutex_lock(&lock);
+    PosixSema *s=find_posix(address);
+    if (!s) { pthread_mutex_unlock(&lock); *runtime_errno()=EINVAL; return -1; }
+    *value=(int32_t)s->value;
+    pthread_mutex_unlock(&lock);
+    return 0;
+}
 uintptr_t runtime_sema_resolve(const char *name) {
     if (runtime_nid_equals(name,"188x57JYp0g#libkernel")) return (uintptr_t)sem_create;
     if (runtime_nid_equals(name,"Zxa0VhQVTsk#libkernel")) return (uintptr_t)sem_wait;
@@ -176,6 +262,11 @@ uintptr_t runtime_sema_resolve(const char *name) {
     if (runtime_nid_equals(name,"12wOHk8ywb0#libkernel")) return (uintptr_t)sem_poll;
     if (runtime_nid_equals(name,"4DM06U2BNEY#libkernel")) return (uintptr_t)sem_cancel;
     if (runtime_nid_equals(name,"R1Jvn8bSCW8#libkernel")) return (uintptr_t)sem_delete;
+    if (runtime_nid_equals(name,"pDuPEf3m4fI#libScePosix")) return (uintptr_t)posix_sem_init;
+    if (runtime_nid_equals(name,"cDW233RAwWo#libScePosix")) return (uintptr_t)posix_sem_destroy;
+    if (runtime_nid_equals(name,"YCV5dGGBcCo#libScePosix")) return (uintptr_t)posix_sem_wait;
+    if (runtime_nid_equals(name,"IKP8typ0QUk#libScePosix")) return (uintptr_t)posix_sem_post;
+    if (runtime_nid_equals(name,"Bq+LRV-N6Hk#libScePosix")) return (uintptr_t)posix_sem_getvalue;
     return 0;
 }
 void runtime_sema_report(void) {
@@ -184,4 +275,3 @@ void runtime_sema_report(void) {
            created,deleted,acquired,signaled,timed_out);
     pthread_mutex_unlock(&lock);
 }
-

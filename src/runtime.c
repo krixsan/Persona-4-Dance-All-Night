@@ -28,20 +28,7 @@ static _Thread_local unsigned char *tls_blocks[TLS_MODULES];
 static void *process_param;
 void runtime_set_procparam(void *param) {
     process_param=param;
-    /* bbport: the game's libc heap settings (SceProcParam +0x30: SceLibcParam; its +0x10.. pointers to
-     * the heap size, delayed and extended allocation flags, initial size). */
-    const uint64_t *p=(const uint64_t *)param;
-    if (!p || p[0]<0x38 || !p[6]) return;
-    const uint64_t *libc=(const uint64_t *)p[6];
-    printf("Runtime: libc param size %#llx, entries %u", (unsigned long long)libc[0], (unsigned)libc[1]);
-    static const char *names[]={"heap size","delayed alloc","extended alloc","initial size"};
-    for (int i=0;i<4 && (uint64_t)(2+i)*8<libc[0];++i) {
-        const void *field=(const void *)libc[2+i];
-        if (!field) { printf(", %s -",names[i]); continue; }
-        if (i==0 || i==3) printf(", %s %#llx",names[i],(unsigned long long)*(const uint64_t *)field);
-        else printf(", %s %u",names[i],*(const uint32_t *)field);
-    }
-    printf("\n");
+    if (param) puts("Runtime: process parameters mapped");
 }
 static ABI void *guest_procparam(void) { return process_param; }
 static void **application_heap_api;
@@ -245,6 +232,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (timer) return timer;
     uintptr_t sema = runtime_sema_resolve(name);
     if (sema) return sema;
+    uintptr_t fiber = runtime_fiber_resolve(name);
+    if (fiber) return fiber;
     uintptr_t eventflag = runtime_eventflag_resolve(name);
     if (eventflag) return eventflag;
     uintptr_t json = runtime_json2_resolve(name);

@@ -271,15 +271,83 @@ static int host_protect(uintptr_t address, uint64_t size, int prot) {
 }
 /* Released pages read as zero when reused, like the memfd's punched holes. */
 static void host_discard(uint64_t phys, uint64_t size) { memset(backing_base+phys,0,size); }
+int runtime_memory_handle_fault(uintptr_t address, unsigned access) {
+#ifdef _WIN32
+    const uint64_t bytes=POOL_SIZE+FLEX_SPAN;
+    uintptr_t base=(uintptr_t)backing_base;
+    if (!backing_base ||
+        !((address>=base && address-base<bytes) || (address>=USER_MIN && address<USER_MAX)))
+        return 0;
+
+    MEMORY_BASIC_INFORMATION info;
+    if (!VirtualQuery((void *)address,&info,sizeof(info)) ||
+        info.State!=MEM_RESERVE || info.Type!=MEM_MAPPED)
+        return 0;
+
+    DWORD protect;
+    uintptr_t allowed_end=UINTPTR_MAX;
+    if (address>=base && address-base<bytes) {
+        protect=PAGE_READWRITE;
+    } else {
+        int guest_prot, type;
+        if (!runtime_memory_vma_info(address,&guest_prot,&type,&allowed_end)) return 0;
+        (void)type;
+        protect=win_prot(guest_prot);
+    }
+    if (protect==PAGE_NOACCESS || protect==PAGE_GUARD) return 0;
+    const int readable=protect==PAGE_READONLY || protect==PAGE_READWRITE ||
+        protect==PAGE_WRITECOPY || protect==PAGE_EXECUTE_READ ||
+        protect==PAGE_EXECUTE_READWRITE || protect==PAGE_EXECUTE_WRITECOPY;
+    const int writable=protect==PAGE_READWRITE || protect==PAGE_WRITECOPY ||
+        protect==PAGE_EXECUTE_READWRITE || protect==PAGE_EXECUTE_WRITECOPY;
+    const int executable=protect==PAGE_EXECUTE || protect==PAGE_EXECUTE_READ ||
+        protect==PAGE_EXECUTE_READWRITE || protect==PAGE_EXECUTE_WRITECOPY;
+    if ((access==0 && !readable) || (access==1 && !writable) ||
+        (access==8 && !executable) || (access!=0 && access!=1 && access!=8))
+        return 0;
+
+    const uintptr_t region_start=(uintptr_t)info.BaseAddress;
+    const uintptr_t region_end=region_start+info.RegionSize;
+    uintptr_t start=address & ~(uintptr_t)((UINT64_C(2)<<20)-1);
+    if (start<region_start) start=region_start;
+    uintptr_t end=start+(UINT64_C(2)<<20);
+    if (end<start || end>region_end) end=region_end;
+    if (end>allowed_end) end=allowed_end;
+    if (end<=start || !VirtualAlloc((void *)start,end-start,MEM_COMMIT,protect)) {
+        static volatile LONG reported;
+        if (InterlockedCompareExchange(&reported,1,0)==0) {
+            static const char message[]="Runtime: lazy guest-memory commit failed; access violation remains unhandled\n";
+            DWORD written;
+            WriteFile(GetStdHandle(STD_ERROR_HANDLE),message,sizeof(message)-1,&written,NULL);
+        }
+        return 0;
+    }
+    {
+        static volatile LONG reported;
+        if (InterlockedCompareExchange(&reported,1,0)==0) {
+            static const char message[]="Runtime: lazy guest-memory pages committed on first access\n";
+            DWORD written;
+            WriteFile(GetStdHandle(STD_ERROR_HANDLE),message,sizeof(message)-1,&written,NULL);
+        }
+    }
+    return 1;
+#else
+    (void)address;
+    (void)access;
+    return 0;
+#endif
+}
 /* Direct memory occupies [0,POOL_SIZE) of the section, flexible memory [POOL_SIZE,+FLEX_SPAN). */
 static int pool(void) {
     if (backing_base) return 0;
     runtime_memory_reserve();
     uint64_t bytes=POOL_SIZE+FLEX_SPAN;
-    section=CreateFileMapping2(INVALID_HANDLE_VALUE,NULL,FILE_MAP_ALL_ACCESS,PAGE_EXECUTE_READWRITE,SEC_COMMIT,bytes,NULL,NULL,0);
+    section=CreateFileMapping2(INVALID_HANDLE_VALUE,NULL,FILE_MAP_ALL_ACCESS,PAGE_EXECUTE_READWRITE,SEC_RESERVE,bytes,NULL,NULL,0);
     if (!section) { fprintf(stderr,"Runtime: cannot create %" PRIu64 " MiB of guest memory (error %lu); is the page file large enough?\n",bytes>>20,GetLastError()); return -1; }
     backing_base=MapViewOfFile3(section,GetCurrentProcess(),NULL,0,bytes,0,PAGE_READWRITE,NULL,0);
-    return backing_base ? 0 : -1;
+    if (!backing_base) { fprintf(stderr,"Runtime: cannot map %" PRIu64 " MiB of reserved guest memory (error %lu)\n",bytes>>20,GetLastError()); return -1; }
+    printf("Runtime: reserved %" PRIu64 " MiB of guest memory; pages commit on access\n",bytes>>20);
+    return 0;
 }
 #else
 /* Direct memory occupies [0,POOL_SIZE) of the memfd, flexible memory [POOL_SIZE,+FLEX_SPAN). */
@@ -1144,4 +1212,3 @@ void runtime_memory_report(void) {
     printf("Runtime: flexible maps=%zu, in use=%" PRIu64 ", protects=%zu, queries=%zu, regions=%zu\n",
            flexible_maps, flexible_bytes, protects, queries, vma_count);
 }
-

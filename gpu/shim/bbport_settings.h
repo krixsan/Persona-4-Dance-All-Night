@@ -42,27 +42,26 @@ inline constexpr Effect Effects[] = {
     {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", false},
 };
 inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));
-/// SacredFire: game patches (patches/CrashTeamRacing.xml), selected by these bbport.ini keys and
-/// compiled into the executable at start by scripts/patches.py; a restart applies a change.
-/// The patches are community work from illusionyy/PS-Game-Patch
-/// (https://github.com/illusionyy/PS-Game-Patch, patches/xml/CrashTeamRacingUS-Orbis.xml):
-/// "60 FPS Unlock" and "Disable Motion Blur" by illusion, "Resolution Patch (1080p for PS4 Pro)"
-/// by TroyWarez. SacredFire only corrected the last one's address (docs/sacredfire/08-patches.md).
+#ifdef LEGACY_GAME_HOOKS
 inline constexpr Effect GamePatches[] = {
     {"patch_60fps", "60 FPS unlock (illusion)", "60 FPS (illusion)", false},
     {"patch_no_motion_blur", "Disable motion blur (illusion)", "Без размытия в движении (illusion)", false},
     {"patch_pro_1080p", "1080p in PS4 Pro mode (TroyWarez; with BB_NEO=1)", "1080p в режиме PS4 Pro (TroyWarez; с BB_NEO=1)", false},
 };
 inline constexpr int GamePatchCount = int(sizeof(GamePatches) / sizeof(GamePatches[0]));
+#else
+inline constexpr std::array<Effect, 0> GamePatches{};
+inline constexpr int GamePatchCount = 0;
+#endif
 /// SacredFire: bbport.ini render_res, the scene size CTR renders (through its PS4 Pro path above
 /// 1080p; scripts/patches.py and run.py apply it at start, docs/sacredfire/13-resolution.md).
 inline constexpr int RenderResHeights[] = {480, 720, 1080, 1440, 1620, 2160};
 inline constexpr int RenderResCount = 6;
 /// Live output resolutions: the upscaler's output and the UI host targets.
 /// v0.3: 16:9 modes plus the ultrawide outputs (Settings > Display > Aspect ratio).
-inline constexpr int OutputWidths[] = {1280, 1920, 2560, 3840, 2560, 3440, 5120};
-inline constexpr int OutputHeights[] = {720, 1080, 1440, 2160, 1080, 1440, 1440};
-inline constexpr int OutputCount = 7;
+inline constexpr int OutputWidths[] = {1280, 1920, 2560, 3840};
+inline constexpr int OutputHeights[] = {720, 1080, 1440, 2160};
+inline constexpr int OutputCount = 4;
 inline constexpr int OutputDefault = 1; ///< 1920x1080, the game's own size
 
 /// SacredFire: controller ports for split screen (bbport.ini port.1..4: SDL GUID or part of the
@@ -140,7 +139,7 @@ struct Values {
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
     /// Applied at start (patches.py); the menu shows when a restart is needed.
     std::atomic<bool> effects[EffectCount]{};
-    std::atomic<bool> game_patches[GamePatchCount]{}; ///< SacredFire: see GamePatches
+    std::array<std::atomic<bool>, GamePatchCount> game_patches{}; ///< see GamePatches
     std::atomic<int> model_lod{0}; ///< -2 highest .. 2 lowest, 0 the game's
     std::atomic<int> render_res{-1}; ///< index into RenderResHeights, -1 when not set
     /// SacredFire: the upscaler (Temporal: off, FSR 1, FSR 3, DLSS).
@@ -169,7 +168,7 @@ struct Values {
     int startup_upscaler = UpscalerFsr3;
     bool startup_object_motion = true;
     bool startup_effects[EffectCount]{};
-    bool startup_game_patches[GamePatchCount]{};
+    std::array<bool, GamePatchCount> startup_game_patches{};
     int startup_model_lod = 0;
     int startup_render_res = -1;
     int startup_temporal = TemporalFsr1, startup_dlss_quality = 0, startup_dlss_output = 0;

@@ -18,7 +18,7 @@ class ModTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.game = self.root / 'CUSA03173'
+        self.game = self.root / 'CUSA12112'
         self.assets = self.game / 'dvdroot_ps4' / 'chr'
         self.assets.mkdir(parents=True)
         (self.game / 'eboot.bin').write_bytes(b'original executable')
@@ -113,7 +113,7 @@ class ModTests(unittest.TestCase):
         self.assertEqual({p.name for p in result.iterdir()}, {'dvdroot_ps4', 'eboot.bin'})
 
     def test_wrapped_and_bare_layouts(self):
-        layouts = {'Title': 'CUSA03173/dvdroot_ps4/chr', 'Archive': 'Archive v1.2/dvdroot_ps4/chr',
+        layouts = {'Title': 'CUSA12112/dvdroot_ps4/chr', 'Archive': 'Archive v1.2/dvdroot_ps4/chr',
                    'Bare': 'chr', 'Nested': 'Nested/app0/dvdroot_ps4/chr'}
         for name, path in layouts.items():
             folder = self.moddir / name / path
